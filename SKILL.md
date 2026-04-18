@@ -61,7 +61,7 @@ Read `~/.colab_automation_notebook_configs.json` via `get_notebook_config(notebo
 1. Read `~/.colab_automation_notebook_configs.json` for this notebook's last-used values
 2. Fill params from config file + project skill table + user request
 3. If any gaps: ask user ONE message with all missing items
-4. Show config summary → ask "确认运行？"
+4. Show config summary **including all params from config file** (sync src/dest, require_gpu, disconnect_on_success, output_path) → ask "确认运行？"
 5. Wait for explicit confirmation — **never skip this step**
 6. Generate and execute
 
@@ -165,16 +165,16 @@ def my_extractor(texts: list[str]) -> str | None:
 
 ```python
 results = asyncio.run(run_notebooks([
-    RunConfig(notebook_id="", local_notebook_path=NB, authuser="0",
+    RunConfig(notebook_id="", local_notebook_path=NB,
               cell_patches=[CellPatch(r"^SPLIT = .+$", "SPLIT = 'A'")],
               output_path="artifacts/out_A.txt"),
-    RunConfig(notebook_id="", local_notebook_path=NB, authuser="1",
+    RunConfig(notebook_id="", local_notebook_path=NB,
               cell_patches=[CellPatch(r"^SPLIT = .+$", "SPLIT = 'B'")],
               output_path="artifacts/out_B.txt"),
 ]))
 ```
 
-Each account uploads its own patched copy via Colab UI — no race conditions.
+Each RunConfig auto-selects a different account via LRU (never hardcode authuser). Each account uploads its own patched copy via Colab UI — no race conditions.
 
 ## Account setup
 
