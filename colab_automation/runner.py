@@ -12,7 +12,8 @@ from pathlib import Path
 from .config import RunConfig
 from .js import STATUS_JS
 from .notebook_utils import apply_patches_to_notebook
-from .session import ColabSession, GpuQuotaError, CellPatchError, NotebookError, _is_connected
+from .session import ColabSession, GpuQuotaError, NotebookError, _is_connected
+from .utils import ensure_browser
 
 def _p(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
@@ -59,7 +60,11 @@ def _load_known_accounts() -> list[str]:
     """Return authuser indices from ~/.colab_automation_accounts (one per line, # = comment)."""
     try:
         lines = _ACCOUNTS_FILE.read_text().splitlines()
-        return [l.strip() for l in lines if l.strip() and not l.strip().startswith("#")]
+        return [
+            line.strip()
+            for line in lines
+            if line.strip() and not line.strip().startswith("#")
+        ]
     except FileNotFoundError:
         return []
     except Exception:
@@ -310,6 +315,7 @@ async def run_notebook(config: RunConfig) -> RunResult:
     on GpuQuotaError. Returns the first non-gpu_error result.
     """
     t0 = time.time()
+    ensure_browser(cdp_port=config.cdp_port)
 
     # Sync code once — shared across all authusers for this config
     if config.local_code_dir and config.code_sync_fn:

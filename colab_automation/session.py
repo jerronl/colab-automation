@@ -1,15 +1,15 @@
 # colab_automation/session.py
 from __future__ import annotations
-import asyncio, re, time
-from dataclasses import dataclass
-from typing import TYPE_CHECKING
+import asyncio
+import re
+import time
 
 from playwright.async_api import async_playwright, Browser, BrowserContext, Page
 
 from .js import (
     STATUS_JS, CONNECT_JS, GPU_ERR_JS, TOO_MANY_SESSIONS_JS, CLICK_TEXT_JS,
     DRIVE_JS, TAIL_JS, PATCH_CELL_JS, CELL_EXEC_STATE_JS, CELL_ERROR_JS,
-    GENERIC_DIALOG_BTN_JS, CLICK_RUNTIME_MENUBAR_JS, FIND_VISIBLE_TEXT_JS,
+    GENERIC_DIALOG_BTN_JS, FIND_VISIBLE_TEXT_JS,
     STILL_THERE_JS,
 )
 from .config import RunConfig, CellPatch
@@ -819,8 +819,11 @@ class ColabSession:
                     # Drive just mounted — re-fire Ctrl+F9 and reset counters
                     await self._fire_run(page)
                     await asyncio.sleep(2)
-                    tick = 0; dense_ticks = 0; in_sparse = False
-                    was_executing = False; idle_streak = 0
+                    tick = 0
+                    dense_ticks = 0
+                    in_sparse = False
+                    was_executing = False
+                    idle_streak = 0
                     continue
                 if handled:
                     continue
@@ -867,7 +870,7 @@ class ColabSession:
                     tail_text = "\n".join(tail)
                     _ERR_KWDS = ("Traceback (most recent call last)", "--- FAILED", "FileNotFoundError", "Error:")
                     if any(kw in tail_text for kw in _ERR_KWDS):
-                        _p(f"[ERROR] Error detected in output during poll")
+                        _p("[ERROR] Error detected in output during poll")
                         for line in tail[-20:]:
                             _p(f"  > {line}")
                         raise NotebookError(f"Error detected in output: {tail_text[-500:]!r}")
@@ -985,7 +988,7 @@ class ColabSession:
                     # Reconnected — could be OAuth-triggered re-run or spurious reconnect.
                     # If not executing, this is a wasted GPU session: disconnect and declare complete.
                     if not ("Executing" in probe_status or "Waiting" in probe_status):
-                        _p(f"  Runtime reconnected but idle after unassign — disconnecting to avoid wasting quota.")
+                        _p("  Runtime reconnected but idle after unassign — disconnecting to avoid wasting quota.")
                         try:
                             await self.disconnect_and_delete_runtime(page)
                         except Exception:
@@ -997,12 +1000,15 @@ class ColabSession:
                         status = probe_status
                         await self._fire_run(page)
                         await asyncio.sleep(2)
-                        tick = 0; dense_ticks = 0; in_sparse = False
-                        was_executing = False; idle_streak = 0
+                        tick = 0
+                        dense_ticks = 0
+                        in_sparse = False
+                        was_executing = False
+                        idle_streak = 0
                         continue
                 else:
                     # Still connecting — disconnect and declare complete
-                    _p(f"  Runtime reconnecting after unassign — disconnecting to avoid wasting quota.")
+                    _p("  Runtime reconnecting after unassign — disconnecting to avoid wasting quota.")
                     try:
                         await self.disconnect_and_delete_runtime(page)
                     except Exception:

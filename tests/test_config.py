@@ -1,5 +1,3 @@
-import re
-import pytest
 from colab_automation.config import CellPatch, RunConfig
 
 

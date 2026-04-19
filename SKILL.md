@@ -17,12 +17,6 @@ requires:
 
 Automates Google Colab notebook execution via Playwright CDP. Declare a `RunConfig`; the framework handles connect, OAuth, cell patching, monitoring, and output extraction autonomously.
 
-## Install
-
-```bash
-~/voracle-env/bin/pip install -e /mnt/c/git/colab-automation
-```
-
 ## Project defaults (voracle)
 
 **Notebooks — `local_notebook_path` is required, no fallback:**

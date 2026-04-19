@@ -1,6 +1,10 @@
 """Standalone utilities — not imported by the main package by default."""
 from __future__ import annotations
-import asyncio, glob, subprocess, time, urllib.request
+import asyncio
+import glob
+import subprocess
+import time
+import urllib.request
 from pathlib import Path
 
 
@@ -24,7 +28,7 @@ def ensure_browser(cdp_port: int = 9223, profile: Path | None = None) -> subproc
     chrome = _find_chromium()
     proc = subprocess.Popen(
         [
-            chrome,
+            "nohup", chrome,
             f"--remote-debugging-port={cdp_port}",
             f"--user-data-dir={profile}",
             "--no-first-run", "--no-default-browser-check",
@@ -32,6 +36,7 @@ def ensure_browser(cdp_port: int = 9223, profile: Path | None = None) -> subproc
         ],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
+        stdin=subprocess.DEVNULL,
         start_new_session=True,
     )
     deadline = time.time() + 20
