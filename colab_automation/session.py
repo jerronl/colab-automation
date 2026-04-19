@@ -624,15 +624,15 @@ class ColabSession:
     async def _read_output_frames(self, page: Page) -> list[str]:
         """Read recent output lines from cell outputs.
 
-        Reads from two sources and merges:
+        Reads from two sources (current notebook only):
         1. TAIL_JS — shadow DOM walk (works in normal mode, outputs in DOM)
-        2. page.frames — all output iframes (works in private outputs mode,
-           where outputs are rendered inside iframes not in the main DOM)
+        2. colab output iframes (works in private outputs mode)
+
         Returns a flat list of non-empty lines.
         """
         lines: list[str] = []
 
-        # Source 1: shadow DOM (non-private outputs mode)
+        # Source 1: shadow DOM in main frame (non-private outputs mode)
         try:
             result = await page.evaluate(TAIL_JS)
             if isinstance(result, list):
@@ -640,16 +640,27 @@ class ColabSession:
         except Exception:
             pass
 
-        # Source 2: page frames (private outputs mode — outputs in iframes)
-        for frame in page.frames:
-            try:
-                text = await frame.inner_text("body")
-                for line in text.splitlines():
-                    line = line.strip()
-                    if line and line not in lines:
-                        lines.append(line)
-            except Exception:
-                pass
+        # Source 2: colab output iframes (private outputs mode)
+        # Note: outputframe iframes are cross-origin googleusercontent.com iframes
+        # accessed via DOM query, not Playwright's frame list
+        try:
+            iframes = await page.query_selector_all("iframe")
+            for iframe in iframes:
+                try:
+                    src = await iframe.get_attribute("src")
+                    if src and "outputframe" in src:
+                        # Access via content_frame() for cross-origin iframes
+                        frame = await iframe.content_frame()
+                        if frame:
+                            text = await frame.inner_text("body")
+                            for line in text.splitlines():
+                                line = line.strip()
+                                if line and line not in lines:
+                                    lines.append(line)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
         return lines
 
@@ -850,17 +861,25 @@ class ColabSession:
                     raise
                 except Exception:
                     pass
-                # Periodic: log tail and scan output for error keywords
-                if tick % max(1, int(120 / config.sparse_interval)) == 0:
+                # Check output for Traceback errors (catch exceptions like FileNotFoundError)
+                try:
                     tail = await self._read_output_frames(page)
+                    tail_text = "\n".join(tail)
+                    _ERR_KWDS = ("Traceback (most recent call last)", "--- FAILED", "FileNotFoundError", "Error:")
+                    if any(kw in tail_text for kw in _ERR_KWDS):
+                        _p(f"[ERROR] Error detected in output during poll")
+                        for line in tail[-20:]:
+                            _p(f"  > {line}")
+                        raise NotebookError(f"Error detected in output: {tail_text[-500:]!r}")
+                except NotebookError:
+                    raise
+                except Exception:
+                    pass
+                # Periodic: log tail
+                if tick % max(1, int(120 / config.sparse_interval)) == 0:
                     _p(f"  [tick {tick}] {status!r}")
                     for line in tail[-15:]:
                         _p(f"    > {line}")
-                    tail_text = "\n".join(tail)
-                    _ERR_KWDS = ("Traceback (most recent call last)", "--- FAILED")
-                    if any(kw in tail_text for kw in _ERR_KWDS):
-                        _p(f"[ERROR] Error keyword in output during poll")
-                        raise NotebookError(f"Error keyword detected in output: {tail_text[-400:]!r}")
 
             # Pivot: switch dense → sparse when target cell starts running
             if not in_sparse:

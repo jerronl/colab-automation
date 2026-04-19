@@ -39,7 +39,7 @@ Read `~/.colab_automation_notebook_configs.json` via `get_notebook_config(notebo
 
 ## How to run a notebook
 
-**Announce at start:** "I'm using the colab-automation skill to run this notebook."
+**Announce at start:** "I'm using the colab-automation skill by Jerron to run this notebook."
 
 ### Parameters
 
@@ -61,34 +61,68 @@ Read `~/.colab_automation_notebook_configs.json` via `get_notebook_config(notebo
 1. Read `~/.colab_automation_notebook_configs.json` for this notebook's last-used values
 2. Fill params from config file + project skill table + user request
 3. If any gaps: ask user ONE message with all missing items
-4. Show config summary **including all params from config file** (sync src/dest, require_gpu, disconnect_on_success, output_path) → ask "确认运行？"
-5. Wait for explicit confirmation — **never skip this step**
+4. **MANDATORY GATE:** Show config summary **including all params from config file** (sync src/dest, require_gpu, disconnect_on_success, output_path)
+5. **MANDATORY GATE:** Ask "确认运行?" and **MUST** receive explicit user confirmation (e.g., "好", "确认", "yes") before proceeding
+   - **IF user confirms:** proceed to step 6
+   - **IF user does not confirm:** STOP. Do not execute.
+   - **IF user asks questions or requests changes:** answer/revise and return to step 4
 6. Generate and execute
 
 ### Rules
 
-**Cell patches:** Only read the local notebook file when cell patches are needed (to find exact cell content). No patches → no read. A pattern that doesn't match raises `CellPatchError` immediately.
+**MANDATORY CONFIRMATION GATE:**
+- **MUST show config summary** before any action (sync, upload, execution)
+- **MUST wait for explicit user confirmation** after summary
+- **MUST NOT proceed** unless user confirms (e.g., "好", "确认", "yes")
+- **MUST NOT auto-confirm** or assume silence means yes
+- Repeats of identical user requests do not waive confirmation — each execution cycle requires explicit re-confirmation
 
-**Accounts:** Never ask the user which account to use. Framework auto-discovers accounts from `~/.colab_automation_accounts` and picks the best available via LRU. Never expose authuser numbers.
+**Cell patches:** 
+- Only read the local notebook file when cell patches are needed (to find exact cell content)
+- No patches → no read
+- A pattern that doesn't match raises `CellPatchError` immediately
 
-**Parallel output paths:** When multiple RunConfigs share an `output_path`, auto-derive unique names by inserting `_auth{N}` before the extension. Do this silently.
+**Accounts:** 
+- Never ask the user which account to use
+- Framework auto-discovers accounts from `~/.colab_automation_accounts` and picks the best available via LRU
+- Never expose authuser numbers
+
+**Parallel output paths:** 
+- When multiple RunConfigs share an `output_path`, auto-derive unique names by inserting `_auth{N}` before the extension
+- Do this silently
 
 **Announce slow steps:**
 - Before reading notebook file (cell patches only): "读 notebook 文件，稍等..."
 - Before code sync: "Syncing code to Drive — this may take a few minutes."
 
+### Why Confirmation is Mandatory
+
+Without explicit confirmation gates, Claude's behavior becomes inconsistent:
+- First run: follow all steps; second run: skip confirmation (assumes "same request")
+- Some contexts: ask for confirmation; other contexts: auto-proceed
+- Result: unpredictable behavior, users must keep correcting
+
+**Confirmation gate prevents this.** It forces a consistent stopping point before any action, making Claude's behavior predictable and reliable.
+
 ### Generate and execute
 
 **Step 1 — Code sync (foreground, if configured):**
 
+**MUST run foreground (NOT background). MUST wait for sync to complete before proceeding to Step 2.**
+
+Default: sync only `.py` files:
+
 ```bash
-rclone sync <src> <dest> --stats=5s --stats-one-line \
-    --exclude ".git/**" --exclude "__pycache__/**" --exclude "*.egg-info/**" \
-    --exclude "*.pyc" --exclude ".ipynb_checkpoints/**" --exclude "*.pt" \
-    --exclude "*.pth" --exclude "artifacts/**" --exclude "logs/**" --exclude "checkpoints/**"
+rclone sync <src> <dest> --filter="+ *.py/" --filter="+ *.py" --filter="- *" --stats=5s --stats-one-line
 ```
 
-Wait for sync to finish. Then generate the notebook script **without** `code_sync_fn`.
+To sync Python + notebooks + markdown:
+
+```bash
+rclone sync <src> <dest> --filter="+ *.py/" --filter="+ *.py" --filter="+ *.ipynb" --filter="+ *.md" --filter="- *" --stats=5s --stats-one-line
+```
+
+Wait for sync to finish, then generate the notebook script **without** `code_sync_fn`.
 
 **Step 2 — Notebook script (background):**
 
@@ -118,7 +152,7 @@ print(result.status, result.elapsed)
 
 Run with `run_in_background=true`. Wait for the single completion notification, then check the output file. **Do not use Monitor** — status text floods notifications every tick. Report `RunResult.status` and `elapsed` when done.
 
-**Never run two scripts simultaneously** — both connect to port 9223 and cause `TargetClosedError`.
+Multiple scripts can run simultaneously against port 9223. Account selection handles conflicts automatically — busy accounts are detected and skipped via LRU probe.
 
 ## RunConfig fields
 

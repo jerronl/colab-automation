@@ -76,30 +76,42 @@ rclone config
 rclone ls gdrive:
 ```
 
-## 🧩RunConfig
+## 🧩 RunConfig
 
-You usually don't need this — AI fills it for you. But for full control:
+**You usually don't need this — AI fills it for you. But for full control:**
+
+### User parameters (set per-run)
 
 | Field                   | Default  | Description                                                               |
 | ----------------------- | -------- | ------------------------------------------------------------------------- |
 | `notebook_id`           | required | Google Drive file ID (`""` when uploading a local file)                   |
-| `authuser`              | `"0"`    | Preferred account index; LRU may pick a different one                     |
-| `cdp_port`              | `9223`   | CDP port of the running Chromium instance                                 |
-| `max_connect_wait`      | `300`    | Seconds to wait for runtime to connect                                    |
-| `max_run_wait`          | `2700`   | Seconds to wait for execution to finish                                   |
+| `local_notebook_path`   | `None`   | Upload this `.ipynb` via Colab UI before running                          |
 | `cell_patches`          | `[]`     | `CellPatch` edits applied before running                                  |
+| `require_gpu`           | varies   | Auto-switch CPU runtime to GPU before running (project-dependent default) |
+| `disconnect_on_success` | `True`   | Disconnect runtime after successful run                                   |
+| `output_extractor`      | `None`   | `fn(list[str]) -> str \| None` — extract text from output after execution |
+| `output_path`           | `None`   | Write extracted output here; `None` = print only                          |
+
+### Advanced parameters (usually auto-managed)
+
+⚠️ **Note:** These parameters use default values when running via Claude Code skill. To customize them, use the Python API directly instead of the skill.
+
+| Field                   | Default  | Description                                                               |
+| ----------------------- | -------- | ------------------------------------------------------------------------- |
 | `pivot_cell_pattern`    | `None`   | Regex; when matched cell starts running, switch to sparse polling         |
 | `dense_interval`        | `1.0`    | Poll interval (s) before pivot                                            |
 | `sparse_interval`       | `5.0`    | Poll interval (s) after pivot                                             |
-| `local_notebook_path`   | `None`   | Upload this `.ipynb` via Colab UI before running                          |
-| `notebook_upload_fn`    | `None`   | Alternative upload fn, e.g. rclone; single-account only                   |
-| `local_code_dir`        | `None`   | Local code directory to sync before run                                   |
-| `code_sync_fn`          | `None`   | Sync function, e.g. `rclone_sync("gdrive:")`                              |
-| `require_gpu`           | `False`  | Auto-switch CPU runtime to GPU before running                             |
-| `disconnect_on_success` | `True`   | Disconnect runtime after successful run                                   |
+| `max_connect_wait`      | `300`    | Seconds to wait for runtime to connect                                    |
+| `max_run_wait`          | `2700`   | Seconds to wait for execution to finish                                   |
 | `disconnect_on_error`   | `False`  | Also disconnect runtime on error                                          |
-| `output_extractor`      | `None`   | `fn(list[str]) -> str \| None` — extract text from output after execution |
-| `output_path`           | `None`   | Write extracted output here; `None` = print only                          |
+| `cdp_port`              | `9223`   | CDP port of the running Chromium instance                                 |
+| `notebook_upload_fn`    | `None`   | Alternative upload fn (single-account only)                               |
+| `code_sync_fn`          | `None`   | Code sync function (handled by skill's code_sync_src/dest)                |
+| `code_sync_include`     | `*.py`   | File patterns to sync (e.g., `*.py` or `*.py,*.ipynb,*.md`)               |
+
+### Account selection
+
+**Do not specify `authuser` directly.** The framework auto-selects accounts via LRU and handles account rotation for parallel runs. When using the Claude Code skill, accounts are never exposed to users.
 
 `RunResult` fields:
 

@@ -327,15 +327,29 @@ async def run_notebook(config: RunConfig) -> RunResult:
     result = RunResult(status="gpu_error", final_status="no-status",
                        output=None, elapsed=0.0, authuser=authusers[0])
 
-    for i, authuser in enumerate(authusers):
-        if i > 0:  # primary already claimed in _select_authuser
+    tried: set[str] = set()
+
+    while True:
+        # Pick next untried account; on first iteration authusers[0] is already claimed.
+        authuser = next((au for au in authusers if au not in tried), None)
+        if authuser is None:
+            break
+        tried.add(authuser)
+
+        if len(tried) > 1:  # primary was already claimed in _select_authuser
             state = _load_account_state()
             state[authuser] = time.time()
             _save_account_state(state)
+
         result = await _run_once(config, authuser, t0)
         if result.status != "gpu_error":
             return result
         _p(f"GPU quota on authuser={authuser}, trying next...")
+
+        # Re-probe: other parallel tasks may have claimed accounts since our
+        # initial _select_authuser call. A fresh call sees current runtime busy
+        # state and timestamps, so the next pick is a genuinely free account.
+        authusers = await _select_authuser(candidates, config.cdp_port)
 
     return result  # all accounts exhausted
 
