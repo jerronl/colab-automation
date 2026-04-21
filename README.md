@@ -2,6 +2,8 @@
 
 [![License: MIT-0](https://img.shields.io/badge/License-MIT--0-yellow.svg)](https://opensource.org/licenses/MIT-0)
 
+![Colab Automation demo](assets/colabauto.gif)
+
 Run Google Colab notebooks automatically and get results — without manual execution.
 Treat .ipynb files as reproducible jobs, not UI workflows.
 

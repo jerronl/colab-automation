@@ -120,11 +120,11 @@ Wait for sync to finish, then generate the notebook script **without** `code_syn
 
 **Step 2 — Notebook script (background):**
 
-Always generate a fresh script to `/tmp/`. Never reuse `runs/*.py`. Only read the notebook file if cell patches are needed.
+Always generate a fresh script with a timestamp filename, e.g. `/tmp/colab_run_20260419_153000.py`. This guarantees no old script is reused. Only read the notebook file if cell patches are needed.
 
 ```python
 from colab_automation import RunConfig, run_notebook, save_notebook_config
-import asyncio
+import asyncio, sys
 
 save_notebook_config("voracle_colab.ipynb", {
     "code_sync_src": "/mnt/c/git/voracle/voracle",
@@ -142,9 +142,14 @@ config = RunConfig(
 )
 result = asyncio.run(run_notebook(config))
 print(result.status, result.elapsed)
+if result.status != "completed":
+    sys.exit(1)
 ```
 
-Run with `run_in_background=true`. Wait for the single completion notification, then check the output file. **Do not use Monitor** — status text floods notifications every tick. Report `RunResult.status` and `elapsed` when done.
+Run with `run_in_background=true`. **Do not use Monitor** — status text floods notifications every tick.
+
+- On `status: completed` → report success with elapsed time
+- On `status: failed` (exit code 1) → read output file immediately, report error to user
 
 Multiple scripts can run simultaneously against port 9223. Account selection handles conflicts automatically — busy accounts are detected and skipped via LRU probe.
 

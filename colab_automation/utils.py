@@ -15,7 +15,8 @@ def ensure_browser(cdp_port: int = 9223, profile: Path | None = None) -> subproc
     Raises RuntimeError if Chromium cannot be found or doesn't start.
     """
     if profile is None:
-        profile = Path.home() / ".playwright-profiles" / "voracle-data"
+        profile = Path.home() / ".playwright-profiles" / "autocolab"
+    profile.mkdir(parents=True, exist_ok=True)
 
     # Already running?
     try:

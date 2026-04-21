@@ -591,9 +591,9 @@ class ColabSession:
     # ── Internal execution methods (not for callers) ───────────────────────
 
     async def _handle_oauth(self) -> None:
-        """Click Continue on all open accounts.google.com tabs until none remain."""
+        """Handle all open accounts.google.com tabs: accountchooser → sign-in → Continue."""
         assert self._ctx is not None
-        for rnd in range(15):
+        for rnd in range(20):
             tabs = [pg for pg in self._ctx.pages if "accounts.google.com" in pg.url]
             if not tabs:
                 _p(f"  OAuth done ({rnd} rounds)")
@@ -604,15 +604,30 @@ class ColabSession:
                     await tab.wait_for_load_state("networkidle", timeout=8000)
                 except Exception:
                     pass
-                clicked = await tab.evaluate("""() => {
+                url = tab.url
+                action = await tab.evaluate("""(url) => {
+                    // accountchooser: click the account matching authuser=N
+                    if (url.includes('accountchooser')) {
+                        const m = url.match(/authuser=(\d+)/);
+                        const idx = m ? parseInt(m[1]) : 0;
+                        const accounts = document.querySelectorAll('[data-identifier]');
+                        const target = accounts[idx] || accounts[0];
+                        if (target) { target.click(); return 'chooser:' + (target.getAttribute('data-identifier') || idx); }
+                        return 'chooser:no-accounts';
+                    }
+                    // Continue button (Drive/Colab OAuth consent)
                     for (const b of document.querySelectorAll('button'))
-                        if (b.innerText.trim() === 'Continue') { b.click(); return true; }
-                    return false;
-                }""")
-                _p(f"    {tab.url[:60]}: Continue={clicked}")
+                        if (b.innerText.trim() === 'Continue') { b.click(); return 'continue'; }
+                    // Allow button
+                    for (const b of document.querySelectorAll('button'))
+                        if (['Allow', 'Next', 'Sign in', 'Yes'].includes(b.innerText.trim()))
+                            { b.click(); return 'btn:' + b.innerText.trim(); }
+                    return 'no-action';
+                }""", url)
+                _p(f"    {url[:60]}: {action}")
                 await asyncio.sleep(3)
             await asyncio.sleep(2)
-        _p("  Warning: OAuth not resolved after 15 rounds — proceeding anyway")
+        _p("  Warning: OAuth not resolved after 20 rounds — proceeding anyway")
 
     async def _handle_drive_and_oauth(self, page: Page) -> None:
         """Click Drive dialog → handle OAuth → wait until all OAuth tabs gone."""
