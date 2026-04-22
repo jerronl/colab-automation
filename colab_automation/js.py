@@ -108,7 +108,8 @@ TAIL_JS = r"""() => {
         function walk(root, d=0) {
             if (d > 20) return;
             const outputs = root.querySelectorAll(
-                'colab-cell-output, .output_area, [id*="output"], [class*="cell_output"]'
+                'colab-cell-output, .output_area, [id*="output"], [class*="cell_output"], ' +
+                'div.stream, div.output_text, [class*="output_text"], [class*="output-id"]'
             );
             for (const el of outputs) {
                 const t = (el.innerText || '').trim();
@@ -120,7 +121,7 @@ TAIL_JS = r"""() => {
         }
         walk(document);
         const allLines = blocks.join('\n').split('\n').filter(l => l.trim());
-        const kw = ['epoch','loss=','test_stage','Error','Traceback',
+        const kw = ['epoch','loss=','test_stage','Error','Traceback','RuntimeError',
                     'insample','oos','mae','rmse','PHASE','S1','stage1','Eval',
                     'AAPL','NVDA','test_all','PHASE=','MODE=','run_test=',
                     '[compare]','[viz]','inferring','cached'];
@@ -237,7 +238,7 @@ GENERIC_DIALOG_BTN_JS = r"""() => {
     // Find a visible button with safe-to-click text inside any dialog/modal.
     // Excludes nav-bar items (top < 60px). Returns {text, x, y} or null.
     const SAFE = ['OK', 'Got it', 'Dismiss', 'Continue', 'Reconnect',
-                  'Run anyway', 'Terminate other sessions'];
+                  'Run anyway', 'Terminate other sessions', 'close'];
     function df(node, d=0) {
         if (d > 40) return null;
         if (node.nodeType === 3) {

@@ -652,15 +652,16 @@ class ColabSession:
             result = await page.evaluate(TAIL_JS)
             if isinstance(result, list):
                 lines.extend(result)
-        except Exception:
-            pass
+        except Exception as e:
+            pass  # TAIL_JS failures are expected in some contexts
 
         # Source 2: colab output iframes (private outputs mode)
         # Note: outputframe iframes are cross-origin googleusercontent.com iframes
         # accessed via DOM query, not Playwright's frame list
         try:
             iframes = await page.query_selector_all("iframe")
-            for iframe in iframes:
+            iframe_count = len(iframes) if iframes else 0
+            for iframe in (iframes or []):
                 try:
                     src = await iframe.get_attribute("src")
                     if src and "outputframe" in src:
@@ -672,10 +673,10 @@ class ColabSession:
                                 line = line.strip()
                                 if line and line not in lines:
                                     lines.append(line)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as e:
+                    pass  # Skip iframes we can't read
+        except Exception as e:
+            pass  # Iframe query failures are acceptable
 
         return lines
 
@@ -877,22 +878,25 @@ class ColabSession:
                         )
                 except NotebookError:
                     raise
-                except Exception:
-                    pass
+                except Exception as e:
+                    _p(f"  [sparse] cell_err check failed: {type(e).__name__}: {e}")
                 # Check output for Traceback errors (catch exceptions like FileNotFoundError)
                 try:
                     tail = await self._read_output_frames(page)
                     tail_text = "\n".join(tail)
-                    _ERR_KWDS = ("Traceback (most recent call last)", "--- FAILED", "FileNotFoundError", "Error:")
-                    if any(kw in tail_text for kw in _ERR_KWDS):
-                        _p("[ERROR] Error detected in output during poll")
-                        for line in tail[-20:]:
-                            _p(f"  > {line}")
-                        raise NotebookError(f"Error detected in output: {tail_text[-500:]!r}")
+                    if tail:
+                        _p(f"  [sparse] output: {len(tail)} lines, {len(tail_text)} chars")
+                    _ERR_KWDS = ("Traceback (most recent call last)", "--- FAILED", "FileNotFoundError", "RuntimeError:", "Error:")
+                    for kw in _ERR_KWDS:
+                        if kw in tail_text:
+                            _p(f"[ERROR] Detected '{kw}' in output during sparse poll")
+                            for line in tail[-20:]:
+                                _p(f"  > {line}")
+                            raise NotebookError(f"Error detected in output: {tail_text[-500:]!r}")
                 except NotebookError:
                     raise
-                except Exception:
-                    pass
+                except Exception as e:
+                    _p(f"  [sparse] output check failed: {type(e).__name__}: {e}")
                 # Periodic: log tail
                 if tick % max(1, int(120 / config.sparse_interval)) == 0:
                     _p(f"  [tick {tick}] {status!r}")
@@ -926,16 +930,19 @@ class ColabSession:
                         f"Execution error — cell {idx} state={cell_err.get('state')!r}"
                     )
                 # Fallback: some exceptions (e.g. FileNotFoundError) don't set
-                # executionState to 'error'. Check TAIL_JS for tracebacks — it reads
-                # only cell output elements, not UI iframes, so false positives are safe.
-                tail_lines = await page.evaluate(TAIL_JS)
+                # executionState to 'error'. Check output for tracebacks.
+                # Use _read_output_frames (not TAIL_JS) to detect errors in private outputs mode.
+                tail_lines = await self._read_output_frames(page)
                 if isinstance(tail_lines, list):
                     tail_text = "\n".join(tail_lines)
-                    if "Traceback (most recent call last)" in tail_text:
-                        _p("[ERROR] Traceback detected in cell output")
-                        for line in tail_lines:
-                            _p(f"  > {line}")
-                        raise NotebookError("Execution error — traceback in cell output")
+                    _p(f"  [idle-check] output: {len(tail_lines)} lines, {len(tail_text)} chars")
+                    _ERR_KWDS = ("Traceback (most recent call last)", "RuntimeError:", "Error:")
+                    for kw in _ERR_KWDS:
+                        if kw in tail_text:
+                            _p(f"[ERROR] Detected '{kw}' in output at idle")
+                            for line in tail_lines[-30:]:
+                                _p(f"  > {line}")
+                            raise NotebookError(f"Execution error — {kw} in output")
                 _p("Idle — notebook complete.")
                 break
             # Done B: runtime disconnected mid-run.

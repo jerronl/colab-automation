@@ -56,7 +56,7 @@ Read `~/.colab_automation_notebook_configs.json` via `get_notebook_config(notebo
 2. Fill params from config file + project skill table + user request
 3. If any gaps: ask user ONE message with all missing items
 4. **MANDATORY GATE:** Show config summary **including all params from config file** (sync src/dest, require_gpu, disconnect_on_success, output_path)
-5. **MANDATORY GATE:** Ask "确认运行?" and **MUST** receive explicit user confirmation (e.g., "好", "确认", "yes") before proceeding
+5. **MANDATORY GATE:** Ask "Ready to run?" and **MUST** receive explicit user confirmation (e.g., "yes", "confirm", "ok") before proceeding
    - **IF user confirms:** proceed to step 6
    - **IF user does not confirm:** STOP. Do not execute.
    - **IF user asks questions or requests changes:** answer/revise and return to step 4
@@ -67,7 +67,7 @@ Read `~/.colab_automation_notebook_configs.json` via `get_notebook_config(notebo
 **MANDATORY CONFIRMATION GATE:**
 - **MUST show config summary** before any action (sync, upload, execution)
 - **MUST wait for explicit user confirmation** after summary
-- **MUST NOT proceed** unless user confirms (e.g., "好", "确认", "yes")
+- **MUST NOT proceed** unless user confirms (e.g., "yes", "confirm", "ok")
 - **MUST NOT auto-confirm** or assume silence means yes
 - Repeats of identical user requests do not waive confirmation — each execution cycle requires explicit re-confirmation
 
@@ -86,7 +86,7 @@ Read `~/.colab_automation_notebook_configs.json` via `get_notebook_config(notebo
 - Do this silently
 
 **Announce slow steps:**
-- Before reading notebook file (cell patches only): "读 notebook 文件，稍等..."
+- Before reading notebook file (cell patches only): "Reading notebook file, please wait..."
 - Before code sync: "Syncing code to Drive — this may take a few minutes."
 
 ### Why Confirmation is Mandatory
@@ -122,33 +122,11 @@ Wait for sync to finish, then generate the notebook script **without** `code_syn
 
 Always generate a fresh script with a timestamp filename, e.g. `/tmp/colab_run_20260419_153000.py`. This guarantees no old script is reused. Only read the notebook file if cell patches are needed.
 
-```python
-from colab_automation import RunConfig, run_notebook, save_notebook_config
-import asyncio, sys
+Read `examples/run_notebook.py` for the script template. Fill in all parameters from config file + user request.
 
-save_notebook_config("voracle_colab.ipynb", {
-    "code_sync_src": "/mnt/c/git/voracle/voracle",
-    "code_sync_dest": "gdrive:volrt/voracle/code",
-    "require_gpu": True,
-    "disconnect_on_success": True,
-    "output_path": None,
-})
+Run with `run_in_background=true`. **Do not use Monitor** — the script itself is the monitoring process: it polls Colab every tick, detects errors, and exits immediately when the notebook finishes or fails. Adding a Monitor on top just floods notifications with status text.
 
-config = RunConfig(
-    notebook_id="",
-    local_notebook_path="/mnt/c/git/voracle/voracle/voracle_colab.ipynb",
-    require_gpu=True,
-    disconnect_on_success=True,
-)
-result = asyncio.run(run_notebook(config))
-print(result.status, result.elapsed)
-if result.status != "completed":
-    sys.exit(1)
-```
-
-Run with `run_in_background=true`. **Do not use Monitor** — status text floods notifications every tick.
-
-- On `status: completed` → report success with elapsed time
+- On `status: completed` (exit code 0) → report success with elapsed time
 - On `status: failed` (exit code 1) → read output file immediately, report error to user
 
 Multiple scripts can run simultaneously against port 9223. Account selection handles conflicts automatically — busy accounts are detected and skipped via LRU probe.
@@ -171,43 +149,19 @@ Multiple scripts can run simultaneously against port 9223. Account selection han
 
 ## CellPatch
 
-Edits one cell's source before running. Pattern is regex (multiline).
-
-```python
-CellPatch(pattern=r"^VERSION = .+$", replace='VERSION = "v2"')
-CellPatch(pattern=r"^SEED = \d+$", replace_fn=lambda s: s.replace("42", "99"))
-```
+Edits one cell's source before running. Pattern is regex (multiline). See `examples/cell_patch.py`.
 
 Multiple patches applied in order; each matches the **first** cell whose source matches the pattern.
 
 ## output_extractor
 
-Called once after execution. Receives `list[str]` (one per page frame). Return text to save, or `None`.
-
-```python
-def my_extractor(texts: list[str]) -> str | None:
-    for text in texts:
-        if "[result]" in text:
-            return text[text.find("[result]"):]
-    return None
-```
+Called once after execution. Receives `list[str]` (one per page frame). Return text to save, or `None`. See `examples/output_extractor.py`.
 
 **Save immediately after Idle** — Colab clears private outputs when session ends.
 
 ## Parallel runs
 
-```python
-results = asyncio.run(run_notebooks([
-    RunConfig(notebook_id="", local_notebook_path=NB,
-              cell_patches=[CellPatch(r"^SPLIT = .+$", "SPLIT = 'A'")],
-              output_path="artifacts/out_A.txt"),
-    RunConfig(notebook_id="", local_notebook_path=NB,
-              cell_patches=[CellPatch(r"^SPLIT = .+$", "SPLIT = 'B'")],
-              output_path="artifacts/out_B.txt"),
-]))
-```
-
-Each RunConfig auto-selects a different account via LRU (never hardcode authuser). Each account uploads its own patched copy via Colab UI — no race conditions.
+See `examples/parallel_runs.py`. Each RunConfig auto-selects a different account via LRU (never hardcode authuser). Each account uploads its own patched copy via Colab UI — no race conditions.
 
 ## Account setup
 
@@ -230,20 +184,4 @@ Drive mount dialog always appears on first Ctrl+F9. Framework handles automatica
 
 ## Manual runtime cleanup
 
-When a run finishes but runtime wasn't auto-disconnected:
-
-```python
-import asyncio
-from colab_automation.session import ColabSession, _is_connected
-from colab_automation.js import STATUS_JS
-
-async def main():
-    async with ColabSession(cdp_port=9223) as session:
-        for page in session._ctx.pages:
-            if "colab.research.google.com" not in page.url:
-                continue
-            if _is_connected(await page.evaluate(STATUS_JS)):
-                await session.disconnect_and_delete_runtime(page)
-
-asyncio.run(main())
-```
+When a run finishes but runtime wasn't auto-disconnected, run `examples/manual_cleanup.py`.
