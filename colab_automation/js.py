@@ -121,10 +121,7 @@ TAIL_JS = r"""() => {
         }
         walk(document);
         const allLines = blocks.join('\n').split('\n').filter(l => l.trim());
-        const kw = ['epoch','loss=','test_stage','Error','Traceback','RuntimeError',
-                    'insample','oos','mae','rmse','PHASE','S1','stage1','Eval',
-                    'AAPL','NVDA','test_all','PHASE=','MODE=','run_test=',
-                    '[compare]','[viz]','inferring','cached'];
+        const kw = ['Error', 'Traceback', 'RuntimeError', 'Exception', 'Failed', 'FAILED'];
         const rel = allLines.filter(l => kw.some(k => l.includes(k)));
         return (rel.length ? rel : allLines).slice(-15);
     } catch(e) { return [`error: ${e}`]; }
@@ -178,17 +175,35 @@ READ_CELLS_JS = r"""() => {
 CELL_ERROR_JS = r"""() => {
     try {
         const nm = colab.global.notebookModel;
+        if (!nm || !nm.cells) return {error: false, warning: 'no notebookModel'};
+
         for (let i = 0; i < nm.cells.length; i++) {
             const cell = nm.cells[i];
             if (!cell) continue;
+
             const state = (cell.executionState || '').toLowerCase();
             if (state === 'error' || state === 'failed') {
                 const preview = (cell.textModel?.getValue() || '').slice(0, 80);
-                return {error: true, cellIdx: i, state, preview};
+                return {error: true, cellIdx: i, state, preview, source: 'executionState'};
+            }
+
+            // Fallback: in private outputs mode, executionState may not update.
+            // Check cell output for error markers.
+            if (cell.outputs && Array.isArray(cell.outputs)) {
+                for (const output of cell.outputs) {
+                    const text = output.data?.['text/plain'] ||
+                                 output.data?.['application/vnd.google.colaboratory.output-result'] ||
+                                 output.data?.['text/html'] || '';
+                    if (typeof text === 'string' &&
+                        (text.includes('Traceback') || text.includes('Error') || text.includes('error'))) {
+                        const preview = (cell.textModel?.getValue() || '').slice(0, 80);
+                        return {error: true, cellIdx: i, state: 'error-from-output', preview, source: 'output-data'};
+                    }
+                }
             }
         }
         return {error: false};
-    } catch(e) { return {error: false}; }
+    } catch(e) { return {error: false, warning: 'exception: ' + e.toString()}; }
 }"""
 
 CLICK_RUNTIME_MENUBAR_JS = r"""() => {

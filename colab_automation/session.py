@@ -867,25 +867,28 @@ class ColabSession:
             if not in_sparse:
                 _p(f"  [tick {tick}] {status!r}  exec={_is_executing(status)}  idle_streak={idle_streak}")
             else:
-                # Every sparse tick: check cell executionState for errors
+                # Every sparse tick: check for errors via multiple methods
+                # Method 1: executionState (may be unavailable in private outputs mode)
                 try:
                     cell_err = await page.evaluate(CELL_ERROR_JS)
                     if cell_err.get("error"):
                         idx = cell_err.get("cellIdx", "?")
-                        _p(f"[ERROR] Cell {idx} state={cell_err.get('state')!r} detected during poll")
+                        src = cell_err.get("source", "unknown")
+                        _p(f"[ERROR] Cell {idx} state={cell_err.get('state')!r} (via {src})")
                         raise NotebookError(
                             f"Execution error — cell {idx} state={cell_err.get('state')!r}"
                         )
                 except NotebookError:
                     raise
                 except Exception as e:
-                    _p(f"  [sparse] cell_err check failed: {type(e).__name__}: {e}")
-                # Check output for Traceback errors (catch exceptions like FileNotFoundError)
+                    _p(f"  [sparse] cell_err check failed: {type(e).__name__}")
+
+                # Method 2: read and check output (always available)
                 try:
                     tail = await self._read_output_frames(page)
                     tail_text = "\n".join(tail)
                     if tail:
-                        _p(f"  [sparse] output: {len(tail)} lines, {len(tail_text)} chars")
+                        _p(f"  [sparse] output: {len(tail)} lines")
                     _ERR_KWDS = ("Traceback (most recent call last)", "--- FAILED", "FileNotFoundError", "RuntimeError:", "Error:")
                     for kw in _ERR_KWDS:
                         if kw in tail_text:
@@ -896,7 +899,7 @@ class ColabSession:
                 except NotebookError:
                     raise
                 except Exception as e:
-                    _p(f"  [sparse] output check failed: {type(e).__name__}: {e}")
+                    _p(f"  [sparse] output check error: {type(e).__name__}")
                 # Periodic: log tail
                 if tick % max(1, int(120 / config.sparse_interval)) == 0:
                     _p(f"  [tick {tick}] {status!r}")

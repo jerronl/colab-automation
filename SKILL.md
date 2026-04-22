@@ -122,12 +122,9 @@ Wait for sync to finish, then generate the notebook script **without** `code_syn
 
 Always generate a fresh script with a timestamp filename, e.g. `/tmp/colab_run_20260419_153000.py`. This guarantees no old script is reused. Only read the notebook file if cell patches are needed.
 
-Read `examples/run_notebook.py` for the script template. Fill in all parameters from config file + user request.
+Read `examples/run_notebook.py` or `examples/parallel_runs.py` for script templates. Fill in all parameters from config file + user request.
 
-Run with `run_in_background=true`. **Do not use Monitor** — the script itself is the monitoring process: it polls Colab every tick, detects errors, and exits immediately when the notebook finishes or fails. Adding a Monitor on top just floods notifications with status text.
-
-- On `status: completed` (exit code 0) → report success with elapsed time
-- On `status: failed` (exit code 1) → read output file immediately, report error to user
+Run with `run_in_background=true`. **Do not use Monitor** — the script itself is the monitoring process: it polls Colab, detects errors, and exits with code 0 (success) or 1 (error).
 
 Multiple scripts can run simultaneously against port 9223. Account selection handles conflicts automatically — busy accounts are detected and skipped via LRU probe.
 
@@ -181,6 +178,33 @@ Drive mount dialog always appears on first Ctrl+F9. Framework handles automatica
 
 - `GpuQuotaError` → `RunResult.status == "gpu_error"` → framework switches authuser automatically
 - `require_gpu=True` — always use; framework auto-switches CPU to GPU
+
+## Error Detection
+
+Framework detects notebook execution errors via multiple methods:
+
+**Sparse Phase (every 5s during execution):**
+- Method 1: Check `executionState` for error/failed status
+- Method 2: Read cell output and search for "Traceback", "RuntimeError", "SyntaxError", "Error:"
+- If either method finds an error → exit immediately with status="error"
+
+**Idle Phase (after execution appears complete):**
+- Check final output for same error keywords
+- Report error if found; otherwise mark as success
+
+**Private Outputs Mode:**
+- In private outputs mode, Colab stores cell outputs in cross-origin iframes
+- Framework reads from both shadow DOM and iframes via `_read_output_frames()`
+- Works transparently — same error detection regardless of output storage mode
+
+**Limitations:**
+- `colab.global.notebookModel.executionState` is unavailable in private outputs mode
+- Framework falls back to output text scanning — always reliable since actual errors appear in output
+
+**Error Keywords Detected:**
+- Traceback (Python exceptions)
+- RuntimeError, SyntaxError (specific error types)
+- Error: (generic errors)
 
 ## Manual runtime cleanup
 
