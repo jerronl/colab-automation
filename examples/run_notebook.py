@@ -1,9 +1,14 @@
 # Run notebook script template.
 # Fill in all UPPERCASE placeholders before running.
-# Save to /tmp/colab_run_YYYYMMDD_HHMMSS.py and run with ~/voracle-env/bin/python.
+# Save to ~/.colab_automation/runs/colab_run_YYYYMMDD_HHMMSS.py and run with your Python environment.
 
 from colab_automation import RunConfig, run_notebook, save_notebook_config, CellPatch
-import asyncio, sys
+import asyncio
+import sys
+import os
+
+# Ensure runs directory exists
+os.makedirs(os.path.expanduser("~/.colab_automation/runs"), exist_ok=True)
 
 save_notebook_config("NOTEBOOK_NAME.ipynb", {
     # "code_sync_src": "/path/to/src",      # omit if no sync
