@@ -1,10 +1,6 @@
 from colab_automation import RunConfig, run_notebooks, CellPatch
 import asyncio
 import sys
-import os
-
-# Ensure runs directory exists
-os.makedirs(os.path.expanduser("~/.colab_automation/runs"), exist_ok=True)
 
 NB = "/path/to/notebook.ipynb"
 

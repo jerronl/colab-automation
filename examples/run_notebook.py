@@ -5,10 +5,6 @@
 from colab_automation import RunConfig, run_notebook, save_notebook_config, CellPatch
 import asyncio
 import sys
-import os
-
-# Ensure runs directory exists
-os.makedirs(os.path.expanduser("~/.colab_automation/runs"), exist_ok=True)
 
 save_notebook_config("NOTEBOOK_NAME.ipynb", {
     # "code_sync_src": "/path/to/src",      # omit if no sync

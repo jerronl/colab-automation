@@ -122,7 +122,10 @@ Wait for sync to finish, then generate the notebook script **without** `code_syn
 
 Always generate a fresh script with a timestamp filename, e.g. `~/.colab_automation/runs/colab_run_20260419_153000.py`. This guarantees no old script is reused. Only read the notebook file if cell patches are needed.
 
-Read `examples/run_notebook.py` or `examples/parallel_runs.py` for script templates. Fill in all parameters from config file + user request.
+**Before writing the script:**
+1. Ensure `~/.colab_automation/runs/` directory exists (create if missing)
+2. Read `examples/run_notebook.py` or `examples/parallel_runs.py` for script templates
+3. Fill in all parameters from config file + user request
 
 Run with `run_in_background=true`. **Do not use Monitor** — the script itself is the monitoring process: it polls Colab, detects errors, and exits with code 0 (success) or 1 (error).
 
