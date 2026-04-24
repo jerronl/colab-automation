@@ -421,19 +421,24 @@ class ColabSession:
                     }
                     walk(document);
                 }""")
-            await asyncio.sleep(1.5)
+            await asyncio.sleep(0.5)
 
-            # Step 3: confirm the dialog.
+            # Step 3: confirm the dialog (with retries).
             # The confirmation button has slot="primaryAction" in the dialog's light DOM.
             # Use FIND_VISIBLE_TEXT_JS to locate it by visible text, then mouse.click.
             # Common button texts: "Delete", "DELETE", "Disconnect".
             confirmed = False
-            for btn_text in ("Delete", "DELETE", "Disconnect"):
-                btn_coords = await page.evaluate(FIND_VISIBLE_TEXT_JS, btn_text)
-                if btn_coords:
-                    _p(f"  Confirm button {btn_text!r} at {btn_coords}")
-                    await page.mouse.click(btn_coords["x"], btn_coords["y"])
-                    confirmed = True
+            for retry in range(4):
+                if retry > 0:
+                    await asyncio.sleep(0.5)
+                for btn_text in ("Delete", "DELETE", "Disconnect"):
+                    btn_coords = await page.evaluate(FIND_VISIBLE_TEXT_JS, btn_text)
+                    if btn_coords:
+                        _p(f"  Confirm button {btn_text!r} at {btn_coords}")
+                        await page.mouse.click(btn_coords["x"], btn_coords["y"])
+                        confirmed = True
+                        break
+                if confirmed:
                     break
             if not confirmed:
                 # Fallback: JS click on slot="primaryAction" element
