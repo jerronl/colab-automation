@@ -83,10 +83,26 @@ GPU_ERR_JS = r"""() => {
 }"""
 
 CLICK_TEXT_JS = r"""(text) => {
+    function findButton(el) {
+        // Walk up to find a button or element with role=button
+        let cur = el;
+        while (cur && cur !== document.body) {
+            if (cur.tagName === 'BUTTON' || cur.getAttribute('role') === 'button') {
+                return cur;
+            }
+            cur = cur.parentElement;
+        }
+        return null;
+    }
     function df(node, d=0) {
-        if (d > 30) return false;
+        if (d > 40) return false;
         if (node.nodeType === 3 && node.textContent.trim() === text) {
-            const p = node.parentElement; if (p) { p.click(); return true; }
+            const p = node.parentElement;
+            if (p) {
+                const btn = findButton(p);
+                if (btn) { btn.click(); return true; }
+                if (p) { p.click(); return true; }
+            }
         }
         if (node.shadowRoot && df(node.shadowRoot, d+1)) return true;
         for (const c of (node.childNodes||[])) { if (df(c, d+1)) return true; }
@@ -96,10 +112,23 @@ CLICK_TEXT_JS = r"""(text) => {
 }"""
 
 DRIVE_JS = r"""() => {
-    const w = document.createTreeWalker(document, NodeFilter.SHOW_TEXT);
-    while (w.nextNode())
-        if (w.currentNode.textContent.includes('Connect to Google Drive')) return true;
-    return false;
+    // Check if "Connect to Google Drive" button is visible
+    function findText(text, node, d=0) {
+        if (d > 60) return false;
+        if (node.nodeType === 3 && node.textContent.trim() === text) {
+            const p = node.parentElement;
+            if (p) {
+                const r = p.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0 && r.top > 60) return true;
+            }
+        }
+        if (node.shadowRoot && findText(text, node.shadowRoot, d+1)) return true;
+        for (const c of (node.childNodes||[])) {
+            if (findText(text, c, d+1)) return true;
+        }
+        return false;
+    }
+    return findText("Connect to Google Drive", document);
 }"""
 
 TAIL_JS = r"""() => {

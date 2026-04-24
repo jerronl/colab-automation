@@ -605,25 +605,69 @@ class ColabSession:
                 except Exception:
                     pass
                 url = tab.url
-                action = await tab.evaluate("""(url) => {
-                    // accountchooser: click the account matching authuser=N
-                    if (url.includes('accountchooser')) {
-                        const m = url.match(/authuser=(\d+)/);
-                        const idx = m ? parseInt(m[1]) : 0;
-                        const accounts = document.querySelectorAll('[data-identifier]');
-                        const target = accounts[idx] || accounts[0];
-                        if (target) { target.click(); return 'chooser:' + (target.getAttribute('data-identifier') || idx); }
-                        return 'chooser:no-accounts';
-                    }
-                    // Continue button (Drive/Colab OAuth consent)
-                    for (const b of document.querySelectorAll('button'))
-                        if (b.innerText.trim() === 'Continue') { b.click(); return 'continue'; }
-                    // Allow button
-                    for (const b of document.querySelectorAll('button'))
-                        if (['Allow', 'Next', 'Sign in', 'Yes'].includes(b.innerText.trim()))
-                            { b.click(); return 'btn:' + b.innerText.trim(); }
-                    return 'no-action';
-                }""", url)
+                # Try to click common OAuth buttons via dispatchEvent
+                # (Google's jsaction buttons don't respond to mouse.click())
+                action = 'no-action'
+                for btn_text in ['Continue', 'Allow', 'Next', 'Sign in', 'Yes']:
+                    try:
+                        clicked = await tab.evaluate(r"""(text) => {
+                            const buttons = document.querySelectorAll('button');
+                            for (const b of buttons) {
+                                if (b.innerText?.trim() === text && !b.disabled) {
+                                    b.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }""", btn_text)
+                        if clicked:
+                            action = f'clicked:{btn_text}'
+                            break
+                    except:
+                        pass
+
+                # Fallback to old DOM-based approach for account chooser
+                if action == 'no-action' and 'accountchooser' in tab.url:
+                    try:
+                        action = await tab.evaluate(r"""() => {
+                            const m = window.location.href.match(/authuser=(\d+)/);
+                            const idx = m ? parseInt(m[1]) : 0;
+                            const accounts = document.querySelectorAll('[data-identifier]');
+                            const target = accounts[idx] || accounts[0];
+                            if (target) { target.click(); return 'chooser:' + (target.getAttribute('data-identifier') || idx); }
+                            return 'chooser:no-accounts';
+                        }""")
+                    except:
+                        pass
+
+                # Diagnostic: if no-action, print all visible text on the page
+                if action == 'no-action' and rnd < 3:  # only on first few rounds to avoid spam
+                    try:
+                        visible_text = await tab.evaluate("""() => {
+                            const texts = [];
+                            const walk = (node) => {
+                                if (node.nodeType === 3) {
+                                    const t = node.textContent.trim();
+                                    if (t.length > 3 && t.length < 100) texts.push(t);
+                                } else {
+                                    if (node.nodeType === 1) {
+                                        const r = node.getBoundingClientRect();
+                                        if (r.width > 0 && r.height > 0) {
+                                            const t = node.innerText?.trim();
+                                            if (t && t.length > 3 && t.length < 100) texts.push(t);
+                                        }
+                                    }
+                                    if (node.shadowRoot) walk(node.shadowRoot);
+                                    for (const c of node.childNodes) walk(c);
+                                }
+                            };
+                            walk(document);
+                            return [...new Set(texts)].slice(0, 20);
+                        }""")
+                        _p(f"    Visible text on page: {visible_text}")
+                    except Exception as e:
+                        _p(f"    Diagnostic error: {e}")
+
                 _p(f"    {url[:60]}: {action}")
                 await asyncio.sleep(3)
             await asyncio.sleep(2)
@@ -632,7 +676,12 @@ class ColabSession:
     async def _handle_drive_and_oauth(self, page: Page) -> None:
         """Click Drive dialog → handle OAuth → wait until all OAuth tabs gone."""
         _p("  Drive dialog — clicking 'Connect to Google Drive'")
-        await page.evaluate(CLICK_TEXT_JS, "Connect to Google Drive")
+        coords = await page.evaluate(FIND_VISIBLE_TEXT_JS, "Connect to Google Drive")
+        if coords:
+            await page.mouse.click(coords['x'], coords['y'])
+        else:
+            # Fallback to text search if coordinates not found
+            await page.evaluate(CLICK_TEXT_JS, "Connect to Google Drive")
         await asyncio.sleep(4)
         await self._handle_oauth()
 
@@ -721,7 +770,9 @@ class ColabSession:
 
         if handle_drive:
             try:
-                if await page.evaluate(DRIVE_JS):
+                # Check for Drive dialog using coordinate-based detection
+                coords = await page.evaluate(FIND_VISIBLE_TEXT_JS, "Connect to Google Drive")
+                if coords:
                     _p(f"{pre}Drive dialog — handling")
                     await self._handle_drive_and_oauth(page)
                     handled.append("drive")
@@ -754,7 +805,9 @@ class ColabSession:
             _p(f"{pre}still_there check error: {e}")
 
         try:
-            if await page.evaluate(CLICK_TEXT_JS, "Run anyway"):
+            coords = await page.evaluate(FIND_VISIBLE_TEXT_JS, "Run anyway")
+            if coords:
+                await page.mouse.click(coords["x"], coords["y"])
                 _p(f"{pre}'Run anyway' clicked")
                 handled.append("run_anyway")
         except Exception as e:
@@ -791,12 +844,21 @@ class ColabSession:
         assert self._ctx is not None
 
         # Pre-run: handle any Drive dialog visible before Ctrl+F9
-        if await page.evaluate(DRIVE_JS):
+        coords = await page.evaluate(FIND_VISIBLE_TEXT_JS, "Connect to Google Drive")
+        if coords:
             _p("Drive dialog before Ctrl+F9 — handling first")
             await self._handle_drive_and_oauth(page)
             await asyncio.sleep(2)
 
         await self._fire_run(page)
+
+        # Post-run: check for Drive dialog that appears immediately after Ctrl+F9
+        await asyncio.sleep(1)
+        coords = await page.evaluate(FIND_VISIBLE_TEXT_JS, "Connect to Google Drive")
+        if coords:
+            _p("Drive dialog after Ctrl+F9 — handling")
+            await self._handle_drive_and_oauth(page)
+            await asyncio.sleep(2)
 
         # Dense rapid-poll phase
         _p(f"Dense poll ({config.dense_interval}s interval)...")
@@ -815,21 +877,55 @@ class ColabSession:
             await asyncio.sleep(interval)
             tick += 1
 
-            # 1. OAuth popup tabs (separate — needs _handle_oauth, not _handle_all_dialogs)
+            # 1. Drive dialog — always check first, regardless of OAuth tabs
+            try:
+                coords = await page.evaluate(FIND_VISIBLE_TEXT_JS, "Connect to Google Drive")
+                if coords:
+                    _p(f"  [tick {tick}] Drive dialog — handling")
+                    await self._handle_drive_and_oauth(page)
+                    await self._fire_run(page)
+                    await asyncio.sleep(2)
+                    tick = 0; dense_ticks = 0; in_sparse = False
+                    was_executing = False; idle_streak = 0
+                    continue
+            except Exception as e:
+                _p(f"  drive check error: {e}")
+
+            # 2. OAuth popup tabs — skip blank/stale tabs (no visible content)
             try:
                 assert self._ctx is not None
                 oauth_tabs = [pg for pg in self._ctx.pages if "accounts.google.com" in pg.url]
-                if oauth_tabs:
-                    _p(f"  [tick {tick}] OAuth tab open — handling")
+                # Only handle if at least one tab has actual content (not just blank page)
+                active_oauth = []
+                for ot in oauth_tabs:
+                    try:
+                        body_len = await ot.evaluate("() => document.body?.innerText?.length || 0")
+                        if body_len > 10:
+                            active_oauth.append(ot)
+                    except Exception:
+                        pass
+                if active_oauth:
+                    _p(f"  [tick {tick}] OAuth tab open — handling ({len(active_oauth)} active)")
                     await self._handle_oauth()
+                    # After OAuth, check Drive dialog — it may have appeared during OAuth handling
+                    coords2 = await page.evaluate(FIND_VISIBLE_TEXT_JS, "Connect to Google Drive")
+                    if coords2:
+                        _p(f"  [tick {tick}] Drive dialog appeared during OAuth — handling")
+                        await self._handle_drive_and_oauth(page)
+                        await self._fire_run(page)
+                        await asyncio.sleep(2)
+                        tick = 0; dense_ticks = 0; in_sparse = False
+                        was_executing = False; idle_streak = 0
                     continue
+                elif oauth_tabs:
+                    _p(f"  [tick {tick}] {len(oauth_tabs)} stale OAuth tab(s) — skipping")
             except Exception as e:
                 _p(f"  oauth check error: {e}")
 
-            # 2. All known Colab dialogs (Drive, TOO_MANY, GPU_ERR, Run anyway, generic)
+            # 3. All known Colab dialogs (TOO_MANY, GPU_ERR, Run anyway, generic)
             try:
                 handled = await self._handle_all_dialogs(
-                    page, label=f"tick {tick}", handle_drive=True
+                    page, label=f"tick {tick}", handle_drive=False
                 )
                 if "drive" in handled:
                     # Drive just mounted — re-fire Ctrl+F9 and reset counters
