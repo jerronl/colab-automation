@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python run_viz_grid.py)",
+      "Bash(~/voracle-env/bin/pip install *)",
+      "Bash(~/voracle-env/bin/python run_viz_grid.py)",
+      "Bash(~/voracle-env/bin/python *)",
+      "Bash(ruff check *)",
+      "Bash(pip install *)",
+      "Bash(~/voracle-env/bin/ruff check *)",
+      "Bash(ln -s /mnt/c/git/colab-automation/examples ~/.claude/skills/colab-automation/examples)",
+      "Bash(python *)",
+      "Bash(python3 -c \"import playwright\")",
+      "Bash(pip show *)",
+      "Read(//home/jerron/**)",
+      "Bash(conda env *)",
+      "Bash(pyenv versions *)",
+      "Bash(pip3 show *)",
+      "Bash(uv run *)",
+      "Bash(mkdir -p ~/.playwright-profiles/autocolab/Default)",
+      "Bash(cp ~/.playwright-profiles/voracle-data/Default/Cookies ~/.playwright-profiles/autocolab/Default/)",
+      "Bash(cp -r ~/.playwright-profiles/voracle-data/Default/\"Local Storage\" ~/.playwright-profiles/autocolab/Default/)",
+      "Bash(cp ~/.playwright-profiles/voracle-data/\"Local State\" ~/.playwright-profiles/autocolab/)",
+      "Bash(python3 *)",
+      "Bash(python3.11 -c \"import playwright\")",
+      "Bash(/home/jerron/voracle-env/bin/python3 /tmp/test_upload_one.py)",
+      "Bash(/home/jerron/voracle-env/bin/python3 -c \"import ast; ast.parse\\(open\\('/tmp/colab_run_epochs.py'\\).read\\(\\)\\); print\\('syntax ok'\\)\")",
+      "Bash(/home/jerron/voracle-env/bin/python3 *)",
+      "Bash(pkill -f \"colab_run.*\\\\.py\")",
+      "Bash(pkill -f \"colab_run_20260423_210101\")",
+      "Bash(pkill -9 -f \"python.*colab\")",
+      "Bash(tee /tmp/oauth_diag.log)",
+      "Bash(pkill -9 -f \"colab_run_20260423\")",
+      "Bash('~/voracle-env/bin/python' -c ' *)",
+      "Bash(pkill -9 -f \"python.*colab_run\")",
+      "Bash(tee /tmp/notebook_run.log)",
+      "Bash(pkill -9 -f \"colab_run\")",
+      "Bash(~/voracle-env/bin/python3 *)",
+      "Bash(rclone config *)"
+    ]
+  }
+}

@@ -36,6 +36,10 @@ _upload_sem = asyncio.Semaphore(1)
 class GpuQuotaError(Exception):
     pass
 
+class DriveSessionError(Exception):
+    """Google Drive session expired or account signed out during upload."""
+    pass
+
 class CellPatchError(Exception):
     """Raised when a CellPatch pattern matches no cell in the notebook."""
     pass
@@ -96,13 +100,54 @@ class ColabSession:
         _p(f"  [authuser={authuser}] Uploading {local_path} via Colab UI...")
 
         page = await self._ctx.new_page()
+        try:
+            return await self._upload_notebook_impl(authuser, local_path, page)
+        except Exception:
+            # Failed upload (DriveSessionError, RuntimeError, timeout, etc.) —
+            # close the orphan tab so it doesn't accumulate.
+            try:
+                await page.close()
+            except Exception:
+                pass
+            raise
 
+    async def _upload_notebook_impl(self, authuser: str, local_path: str, page: "Page") -> tuple[str, "Page"]:
+        """Inner upload flow.  Caller (`upload_notebook`) handles tab cleanup on failure."""
         async with _upload_sem:
             await page.goto(
                 f"https://colab.research.google.com/?authuser={authuser}",
                 wait_until="domcontentloaded",
             )
             await asyncio.sleep(8)
+
+            # Handle "Sign in to continue" overlay (MD-TEXT-BUTTON custom element)
+            for signin_text in ['Sign in to continue', 'Sign in']:
+                try:
+                    clicked = await page.evaluate(r"""(text) => {
+                        const sel = 'button, a, md-text-button, md-filled-button';
+                        for (const el of document.querySelectorAll(sel)) {
+                            if (el.innerText?.trim() === text && !el.disabled) {
+                                el.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }""", signin_text)
+                    if clicked:
+                        _p(f"  [authuser={authuser}] clicked '{signin_text}' — overlay dismissed")
+                        await asyncio.sleep(2)
+                        await self._handle_oauth()
+                        # Reload so Colab re-establishes Drive connection after sign-in
+                        _p(f"  [authuser={authuser}] reloading after sign-in...")
+                        await page.goto(
+                            f"https://colab.research.google.com/?authuser={authuser}",
+                            wait_until="domcontentloaded",
+                        )
+                        await asyncio.sleep(10)
+                        break
+                except Exception:
+                    pass
+
             await page.bring_to_front()
 
             # Check if the 'Open notebook' dialog is already visible (some
@@ -131,27 +176,26 @@ class ColabSession:
                 await page.keyboard.press("Control+o")
             await asyncio.sleep(5)
 
-            upload_coords = await page.evaluate("""() => {
+            upload_clicked = await page.evaluate("""() => {
                 """ + _FIND_HOST + """
                 const host = findHost(document, 0);
-                if (!host) return null;
+                if (!host) return false;
                 for (const item of host.querySelectorAll('md-list-item')) {
                     const span = item.querySelector('span');
                     if (span && span.textContent.trim() === 'Upload') {
-                        const r = item.getBoundingClientRect();
-                        return {x: r.left + r.width / 2, y: r.top + r.height / 2};
+                        item.dispatchEvent(new MouseEvent('click', {bubbles: true, cancelable: true}));
+                        return true;
                     }
                 }
-                return null;
+                return false;
             }""")
 
-            if not upload_coords:
+            if not upload_clicked:
                 raise RuntimeError(
                     f"[authuser={authuser}] 'Upload' item not found in Open notebook "
                     "dialog — dialog may not have fully loaded (waited 5 s)"
                 )
 
-            await page.mouse.click(upload_coords["x"], upload_coords["y"])
             await asyncio.sleep(1.5)
 
             # After clicking Upload, Colab appends input[type="file"] to the
@@ -170,13 +214,101 @@ class ColabSession:
                 )
 
             await el.set_input_files(local_path)
-            await asyncio.sleep(2)
+            await asyncio.sleep(3)
 
-        _p(f"  [authuser={authuser}] File submitted, waiting for notebook to open...")
-        await page.wait_for_url(
-            re.compile(r"colab\.research\.google\.com/drive/"),
-            timeout=120_000,
-        )
+            # After setting the file, Colab may show a "Sign in" button inside
+            # the dialog (Drive session needs re-auth). Click it if present.
+            for _si_text in ['Sign in to continue', 'Sign in']:
+                try:
+                    _si_clicked = await page.evaluate(r"""(text) => {
+                        const sel = 'button, a, md-text-button, md-filled-button';
+                        for (const el of document.querySelectorAll(sel)) {
+                            if (el.innerText?.trim() === text && !el.disabled) {
+                                el.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }""", _si_text)
+                    if _si_clicked:
+                        _p(f"  [authuser={authuser}] post-upload clicked '{_si_text}'")
+                        await asyncio.sleep(2)
+                        await self._handle_oauth()
+                        await asyncio.sleep(15)  # Give in-page OAuth time to complete
+                        # Re-set the file in case the dialog reset the selection after OAuth
+                        try:
+                            _fi2 = await page.evaluate_handle("""() => {
+                                """ + _FIND_HOST + """
+                                const host = findHost(document, 0);
+                                return host ? host.querySelector('input[type="file"]') : null;
+                            }""")
+                            _el2 = _fi2.as_element()
+                            if _el2 is not None:
+                                await _el2.set_input_files([])  # clear first to force change event
+                                await asyncio.sleep(0.3)
+                                await _el2.set_input_files(local_path)
+                                _p(f"  [authuser={authuser}] re-submitted file after OAuth")
+                                await asyncio.sleep(3)
+                        except Exception as _re_err:
+                            _p(f"  [authuser={authuser}] re-submit skipped: {_re_err}")
+                        # Inspect dialog shadow DOM for confirmation buttons
+                        try:
+                            _dlg_diag = await page.evaluate("""() => {
+                                """ + _FIND_HOST + """
+                                const host = findHost(document, 0);
+                                if (!host) return { host: false };
+                                const sr = host.shadowRoot || host;
+                                const sel = 'button, a, md-text-button, md-filled-button, md-list-item, span';
+                                const texts = [...sr.querySelectorAll(sel)]
+                                    .map(e => e.innerText?.trim() || e.textContent?.trim())
+                                    .filter(t => t && t.length < 60)
+                                    .slice(0, 15);
+                                // Also check file input state
+                                const fi = host.querySelector('input[type="file"]');
+                                return { host: true, texts, hasFile: fi ? fi.files.length > 0 : null };
+                            }""")
+                            _p(f"  [authuser={authuser}] dialog diag after re-submit: {_dlg_diag}")
+                        except Exception as _dd_err:
+                            _p(f"  [authuser={authuser}] dialog diag error: {_dd_err}")
+                        break
+                except Exception:
+                    pass
+
+        _p(f"  [authuser={authuser}] File submitted, waiting for notebook to open... (current URL: {page.url})")
+        _drive_deadline = time.time() + 300
+        while True:
+            if re.search(r"colab\.research\.google\.com/drive/", page.url):
+                break
+            if time.time() > _drive_deadline:
+                _p(f"  [authuser={authuser}] wait_for_url timed out. Current URL: {page.url}")
+                try:
+                    _diag = await page.evaluate("""() => {
+                        const sel = 'button, a, md-text-button, md-filled-button';
+                        const btns = [...document.querySelectorAll(sel)].map(e => e.innerText?.trim()).filter(Boolean).slice(0, 10);
+                        return { title: document.title, url: location.href, buttons: btns };
+                    }""")
+                    _p(f"  [authuser={authuser}] page diag: {_diag}")
+                except Exception:
+                    pass
+                raise TimeoutError(f"Notebook upload did not navigate to /drive/ within 300s (authuser={authuser})")
+            try:
+                _dlg = await page.evaluate("""() => {
+                    for (const d of document.querySelectorAll('mwc-dialog')) {
+                        const text = (d.textContent || '').toLowerCase();
+                        const cls  = (d.className  || '').toLowerCase();
+                        if (cls.includes('signed-out') || text.includes('signed out on'))
+                            return 'signed_out';
+                        if (text.includes('invalid authentication'))
+                            return 'invalid_auth';
+                    }
+                    return null;
+                }""")
+            except Exception:
+                _dlg = None
+            if _dlg:
+                _p(f"  [authuser={authuser}] Drive session error detected: {_dlg} — raising DriveSessionError")
+                raise DriveSessionError(f"Drive session expired on authuser={authuser} ({_dlg})")
+            await asyncio.sleep(3)
         await asyncio.sleep(5)
 
         m = re.search(r"/drive/([^?#]+)", page.url)

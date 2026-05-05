@@ -81,3 +81,32 @@ def _find_chromium() -> str:
         if hits:
             return sorted(hits)[-1]
     raise RuntimeError("Chromium not found — run: playwright install chromium")
+
+
+def check_rclone_remote(remote_name: str = "gdrive") -> bool:
+    """
+    Check if rclone remote is configured and accessible.
+    If not configured, prompt user to run rclone config.
+    Returns True if remote exists and is working, False otherwise.
+    """
+    try:
+        result = subprocess.run(
+            ["rclone", "listremotes"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        remotes = result.stdout.strip().split('\n')
+        configured = any(r.rstrip(':') == remote_name for r in remotes if r)
+        if not configured:
+            print(f"❌ rclone remote '{remote_name}' not configured.")
+            print(f"   Run: rclone config")
+            print(f"   Then create a remote named '{remote_name}' pointing to Google Drive.")
+            return False
+        return True
+    except FileNotFoundError:
+        print("❌ rclone not found. Install with: curl https://rclone.org/install.sh | sudo bash")
+        return False
+    except Exception as e:
+        print(f"⚠️  Could not check rclone: {e}")
+        return False
